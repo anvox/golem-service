@@ -28,7 +28,12 @@ build_deploy_command:
 	env GOOS=darwin GOARCH=amd64 go build -o ./dist/golem-deploy-darwin-amd64 ./cmd/deploy/*.go
 	env GOOS=linux GOARCH=amd64 go build -o ./dist/golem-deploy-linux-amd64 ./cmd/deploy/*.go
 	chmod a+x ./dist/golem-deploy*
-build: build_config_command build_ps_command build_entrypoint build_exec build_deploy_command
+build_nextjs_s3_deploy:
+	go build -o ./dist/nextjs-s3-deploy ./cmd/nextjs-s3-deploy/*.go
+	env GOOS=darwin GOARCH=amd64 go build -o ./dist/nextjs-s3-deploy-darwin-amd64 ./cmd/nextjs-s3-deploy/*.go
+	env GOOS=linux GOARCH=amd64 go build -o ./dist/nextjs-s3-deploy-linux-amd64 ./cmd/nextjs-s3-deploy/*.go
+	chmod a+x ./dist/nextjs-s3-deploy*
+build: build_config_command build_ps_command build_entrypoint build_exec build_deploy_command build_nextjs_s3_deploy
 deploy: build
 	echo "Please push to github release manually"
 clean:
