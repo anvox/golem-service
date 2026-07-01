@@ -5,14 +5,14 @@ import (
 )
 
 const HELP_TEXT = `NAME
-	golem-service-exec-remote - Simple service toolkit. Version %s
-		Open SSH connection to a service support SSH by golem-service-entrypoint
+	golem-exec-remote - Simple service toolkit. Version %s
+		Open SSH connection to a service support SSH by golem-entrypoint
 
 SYNOPSIS
-	golem-service-exec-remote [ -h | --help ] [ -v | --version ]
+	golem-exec-remote [ -h | --help ] [ -v | --version ]
 
 DESCRIPTION
-	Open SSH connection to a service support SSH by golem-service-entrypoint
+	Open SSH connection to a service support SSH by golem-entrypoint
 
 	-h, --help
 		Show this help text.

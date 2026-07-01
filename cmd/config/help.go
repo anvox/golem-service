@@ -5,16 +5,16 @@ import (
 )
 
 const HELP_TEXT = `NAME
-	golem-service-config - Simple service toolkit. Version %s
+	golem-config - Simple service toolkit. Version %s
 		Manage service configuration using environment variables.
 
 SYNOPSIS
-	golem-service-config [ -h | --help ] [ -v | --version ]
+	golem-config [ -h | --help ] [ -v | --version ]
 	[< -e <environment> > < -t <stack> > [ -s <service> ] [subcommand]]
 
 DESCRIPTION
 	This command used to manage services' environment variables, which uses AWS Parameter Store under.
-	Manage through golem-service-config to apply our convention in resources management as default.
+	Manage through golem-config to apply our convention in resources management as default.
 	AWS_REGION environment variable is required to fetch info from AWS.
 
 	Subcommands:

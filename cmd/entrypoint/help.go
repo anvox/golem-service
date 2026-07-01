@@ -5,14 +5,14 @@ import (
 )
 
 const HELP_TEXT = `NAME
-	golem-service-entrypoint - Simple service toolkit. Version %s
-		Entrypoint for golem-services run on AWS ECS.
+	golem-entrypoint - Simple service toolkit. Version %s
+		Entrypoint for golem services run on AWS ECS.
 
 SYNOPSIS
-	golem-service-entrypoint [ -h | --help ] [ -v | --version ] <any-supported-proc-type>
+	golem-entrypoint [ -h | --help ] [ -v | --version ] <any-supported-proc-type>
 
 DESCRIPTION
-	Entrypoint for golem-services, supports:
+	Entrypoint for golem services, supports:
 		* Parameter Store as container environment variable
 		* SSH
 		* Local wait

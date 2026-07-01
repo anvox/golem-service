@@ -5,11 +5,11 @@ import (
 )
 
 const HELP_TEXT = `NAME
-	golem-service-ps - Simple service toolkit. Version %s
+	golem-ps - Simple service toolkit. Version %s
 		Manage processes run in services
 
 SYNOPSIS
-	golem-service-ps [ -h | --help ] [ -v | --version ]
+	golem-ps [ -h | --help ] [ -v | --version ]
 	[< -e <environment> > < -t <stack> > < -s <service> > [ -p <process> ] [subcommand]]
 
 DESCRIPTION
@@ -24,10 +24,10 @@ DESCRIPTION
 		i.e.
 
 		# Stop all web and sidekiq proc type of service
-		golem-service-ps -e<environment> -t<stack> -s<service> --process=web,sidekiq kill
+		golem-ps -e<environment> -t<stack> -s<service> --process=web,sidekiq kill
 
 		# Stop a specific task from id get from ps
-		golem-service-ps -e<environment> -t<stack> -s<service> kill <task-id>
+		golem-ps -e<environment> -t<stack> -s<service> kill <task-id>
 
 	The options are as follows:
 	-e <environment>, --environment <environment>
