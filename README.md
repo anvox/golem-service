@@ -1,17 +1,24 @@
-# Golem tools
+# 🗿 Golem
 
-Manage services run on AWS
+`golem` is set of personal tools I used to operate AWS infrastructure, AWS ECS specificly. 
+It was as a gap filler when I was moving from Heroku to AWS ECS. 
+It looks like revolving around https://12factor.net/ and heroku cli. But much more bias on my personal experience and workflow, so I recommend of using it with caution.
 
-# Require arguments
+# Features
 
-Golem commands perform on an specific service on an environment. That's why argument `-e`/`--environment` and `-t`/`--stack` are required. This is the same convention from `golem-tf`.<br/>
-Further, `-s`/`--service` is required for commands need to perform on specific service in stack. 
+- Manage ECS task's environment variable, secret through AWS Parameter store, AWS Secrets
+- List tasks in service
+- Deploy to AWS ECS
+- Entrypoint which support SSH, recycling...
+- Connect to task. Yes, the controlversal `heroku console` `heroku rails c` 😆
+- ...
 
 # Install
 
-For now, the only way to install these tools is from source code. Pull and run `make build`. Then run from repo root directory.
+Download from repository releases. 
+I split subcommands to different binaries to use in specific situations, but still keep the master binary which run all the subcommands.
 
-# Subcommands
+# Usage
 
 ## config
 
@@ -41,4 +48,12 @@ Deploy and update AWS ECS service tasks.
 ```shell
 $ golem-deploy <cluster> <service> [options]
 ```
+
+# Examples
+
+TBA
+
+# Licencse
+
+TBA. Maybe MIT - anyone could use for anything, just don't sue me 😝
 
