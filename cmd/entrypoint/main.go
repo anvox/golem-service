@@ -51,7 +51,7 @@ func main() {
 
 	runCommand(command, envVars, func(pid int) {
 		if config.Platform != "local" && config.ProcType != "wait" {
-			log.Debugf("Set cycling for PID[%i]\n", pid)
+			log.Debugf("Set cycling for PID[%d]\n", pid)
 			go selfCycling(pid)
 		}
 		go func() {

@@ -34,4 +34,11 @@ $ golem-service ps
 $ golem-service ps kill
 ```
 
-## TBA
+## deploy
+
+Deploy and update AWS ECS service tasks.
+
+```shell
+$ golem-deploy <cluster> <service> [options]
+```
+

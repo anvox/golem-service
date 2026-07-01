@@ -70,7 +70,7 @@ func main() {
 	}
 
 	if err := id.Validate(); err != nil {
-		fmt.Println("Error: %s", err)
+		fmt.Printf("Error: %s\n", err)
 		os.Exit(6)
 	}
 

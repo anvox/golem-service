@@ -82,13 +82,13 @@ func signalKill(pid int, sig os.Signal) {
 func selfCycling(pid int) {
 	rand.Seed(time.Now().UnixNano())
 	lifetimeInMinute := rand.Intn(216) + 24*60
-	log.Infof("Self-cycling after [%i] minutes\n", lifetimeInMinute)
+	log.Infof("Self-cycling after [%d] minutes\n", lifetimeInMinute)
 	select {
 	case <-time.After(time.Duration(lifetimeInMinute) * time.Minute):
-		log.Infof("SIGKILL [%i]\n", pid)
+		log.Infof("SIGKILL [%d]\n", pid)
 		syscall.Kill(pid, syscall.SIGKILL)
 	case <-time.After(time.Duration(lifetimeInMinute)*time.Minute + 30*time.Second):
-		log.Infof("Force SIGTERM [%i]\n", pid)
+		log.Infof("Force SIGTERM [%d]\n", pid)
 		syscall.Kill(pid, syscall.SIGTERM)
 	}
 }
