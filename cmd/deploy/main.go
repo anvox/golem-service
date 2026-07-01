@@ -1,17 +1,19 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/ecs"
-	"github.com/aws/aws-sdk-go/service/sts"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
+	"github.com/aws/aws-sdk-go-v2/service/ecs"
+	"github.com/aws/aws-sdk-go-v2/service/ecs/types"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/fatih/color"
 	log "github.com/sirupsen/logrus"
 )
@@ -56,9 +58,9 @@ func main() {
 	if parsed.Task != "" {
 		baseTaskArn = parsed.Task
 	} else {
-		serviceOut, err := ecsClient.DescribeServices(&ecs.DescribeServicesInput{
+		serviceOut, err := ecsClient.DescribeServices(context.TODO(), &ecs.DescribeServicesInput{
 			Cluster:  aws.String(parsed.Cluster),
-			Services: []*string{aws.String(parsed.Service)},
+			Services: []string{parsed.Service},
 		})
 		if err != nil {
 			color.Red("Failed to describe service %q: %v", parsed.Service, err)
@@ -68,13 +70,13 @@ func main() {
 			color.Red("Service %q not found in cluster %q", parsed.Service, parsed.Cluster)
 			os.Exit(1)
 		}
-		baseTaskArn = aws.StringValue(serviceOut.Services[0].TaskDefinition)
+		baseTaskArn = aws.ToString(serviceOut.Services[0].TaskDefinition)
 	}
 
 	color.Blue("Fetching baseline task definition: %s", baseTaskArn)
-	tdOut, err := ecsClient.DescribeTaskDefinition(&ecs.DescribeTaskDefinitionInput{
+	tdOut, err := ecsClient.DescribeTaskDefinition(context.TODO(), &ecs.DescribeTaskDefinitionInput{
 		TaskDefinition: aws.String(baseTaskArn),
-		Include:        []*string{aws.String("TAGS")},
+		Include:        []types.TaskDefinitionField{types.TaskDefinitionFieldTags},
 	})
 	if err != nil {
 		color.Red("Failed to describe task definition: %v", err)
@@ -107,14 +109,14 @@ func main() {
 
 	// 4. Register new task definition revision
 	color.Blue("Registering new task definition revision...")
-	regOut, err := ecsClient.RegisterTaskDefinition(newTdInput)
+	regOut, err := ecsClient.RegisterTaskDefinition(context.TODO(), newTdInput)
 	if err != nil {
 		color.Red("Failed to register new task definition: %v", err)
 		os.Exit(1)
 	}
 
-	newTdArn := aws.StringValue(regOut.TaskDefinition.TaskDefinitionArn)
-	color.Green("Successfully created revision: %s (revision %d)\n", newTdArn, aws.Int64Value(regOut.TaskDefinition.Revision))
+	newTdArn := aws.ToString(regOut.TaskDefinition.TaskDefinitionArn)
+	color.Green("Successfully created revision: %s (revision %d)\n", newTdArn, regOut.TaskDefinition.Revision)
 
 	// 5. Update ECS Service
 	color.Blue("Updating service %q to use task definition %s", parsed.Service, newTdArn)
@@ -124,10 +126,10 @@ func main() {
 		TaskDefinition: aws.String(newTdArn),
 	}
 	if parsed.ForceNewDeployment {
-		updateInput.ForceNewDeployment = aws.Bool(true)
+		updateInput.ForceNewDeployment = true
 	}
 
-	_, err = ecsClient.UpdateService(updateInput)
+	_, err = ecsClient.UpdateService(context.TODO(), updateInput)
 	if err != nil {
 		color.Red("Failed to update service: %v", err)
 		os.Exit(1)
@@ -153,9 +155,9 @@ func main() {
 		time.Sleep(sleepDuration)
 
 		// Describe service to get current rollout/events
-		svcOut, err := ecsClient.DescribeServices(&ecs.DescribeServicesInput{
+		svcOut, err := ecsClient.DescribeServices(context.TODO(), &ecs.DescribeServicesInput{
 			Cluster:  aws.String(parsed.Cluster),
-			Services: []*string{aws.String(parsed.Service)},
+			Services: []string{parsed.Service},
 		})
 		if err != nil {
 			log.Debugf("Error describing service: %v", err)
@@ -165,7 +167,7 @@ func main() {
 			continue
 		}
 
-		svc := svcOut.Services[0]
+		svc := &svcOut.Services[0]
 
 		// Inspect service events for errors/warnings
 		inspectedTime, err := inspectErrors(svc, lastInspectTime, parsed.IgnoreWarnings)
@@ -207,7 +209,7 @@ func main() {
 	// 7. Deregister older task definition if requested
 	if parsed.Deregister {
 		color.Blue("Deregister task definition revision: %s", baseTaskArn)
-		_, err = ecsClient.DeregisterTaskDefinition(&ecs.DeregisterTaskDefinitionInput{
+		_, err = ecsClient.DeregisterTaskDefinition(context.TODO(), &ecs.DeregisterTaskDefinitionInput{
 			TaskDefinition: aws.String(baseTaskArn),
 		})
 		if err != nil {
@@ -219,10 +221,10 @@ func main() {
 }
 
 // handleFailure executes rollback and error handling
-func handleFailure(client *ecs.ECS, parsed *ParsedArgs, oldTdArn, newTdArn string) {
+func handleFailure(client *ecs.Client, parsed *ParsedArgs, oldTdArn, newTdArn string) {
 	if parsed.Rollback {
 		color.Yellow("Rolling back to task definition: %s", oldTdArn)
-		_, err := client.UpdateService(&ecs.UpdateServiceInput{
+		_, err := client.UpdateService(context.TODO(), &ecs.UpdateServiceInput{
 			Cluster:        aws.String(parsed.Cluster),
 			Service:        aws.String(parsed.Service),
 			TaskDefinition: aws.String(oldTdArn),
@@ -243,14 +245,14 @@ func handleFailure(client *ecs.ECS, parsed *ParsedArgs, oldTdArn, newTdArn strin
 			fmt.Print(".")
 			time.Sleep(time.Duration(parsed.SleepTime) * time.Second)
 
-			svcOut, err := client.DescribeServices(&ecs.DescribeServicesInput{
+			svcOut, err := client.DescribeServices(context.TODO(), &ecs.DescribeServicesInput{
 				Cluster:  aws.String(parsed.Cluster),
-				Services: []*string{aws.String(parsed.Service)},
+				Services: []string{parsed.Service},
 			})
 			if err != nil || len(svcOut.Services) == 0 {
 				continue
 			}
-			svc := svcOut.Services[0]
+			svc := &svcOut.Services[0]
 
 			inspectedTime, err := inspectErrors(svc, lastInspectTime, false)
 			if err != nil {
@@ -275,17 +277,18 @@ func handleFailure(client *ecs.ECS, parsed *ParsedArgs, oldTdArn, newTdArn strin
 }
 
 // isDeployed verifies if service runs only the target task definition and desiredCount is met
-func isDeployed(client *ecs.ECS, service *ecs.Service, targetTdArn string) (bool, error) {
-	var primaryDeployment *ecs.Deployment
-	for _, dep := range service.Deployments {
-		if aws.StringValue(dep.Status) == "PRIMARY" {
+func isDeployed(client *ecs.Client, service *types.Service, targetTdArn string) (bool, error) {
+	var primaryDeployment *types.Deployment
+	for i := range service.Deployments {
+		dep := &service.Deployments[i]
+		if aws.ToString(dep.Status) == "PRIMARY" {
 			primaryDeployment = dep
 		}
 	}
 
 	if primaryDeployment != nil {
-		if aws.StringValue(primaryDeployment.RolloutState) == "FAILED" {
-			return false, fmt.Errorf("Deployment Failed: %s", aws.StringValue(primaryDeployment.RolloutStateReason))
+		if depState := primaryDeployment.RolloutState; depState == types.DeploymentRolloutStateFailed {
+			return false, fmt.Errorf("Deployment Failed: %s", aws.ToString(primaryDeployment.RolloutStateReason))
 		}
 	}
 
@@ -294,28 +297,29 @@ func isDeployed(client *ecs.ECS, service *ecs.Service, targetTdArn string) (bool
 	}
 
 	// Verify primary deployment task definition matches
-	if aws.StringValue(primaryDeployment.TaskDefinition) != targetTdArn {
+	if aws.ToString(primaryDeployment.TaskDefinition) != targetTdArn {
 		return false, nil
 	}
 
 	// List and describe tasks
-	var taskArns []*string
-	err := client.ListTasksPages(&ecs.ListTasksInput{
+	var taskArns []string
+	paginator := ecs.NewListTasksPaginator(client, &ecs.ListTasksInput{
 		Cluster:     service.ClusterArn,
 		ServiceName: service.ServiceName,
-	}, func(page *ecs.ListTasksOutput, lastPage bool) bool {
-		taskArns = append(taskArns, page.TaskArns...)
-		return !lastPage
 	})
-	if err != nil {
-		return false, err
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(context.TODO())
+		if err != nil {
+			return false, err
+		}
+		taskArns = append(taskArns, page.TaskArns...)
 	}
 
 	if len(taskArns) == 0 {
-		return aws.Int64Value(service.DesiredCount) == 0, nil
+		return service.DesiredCount == 0, nil
 	}
 
-	descOut, err := client.DescribeTasks(&ecs.DescribeTasksInput{
+	descOut, err := client.DescribeTasks(context.TODO(), &ecs.DescribeTasksInput{
 		Cluster: service.ClusterArn,
 		Tasks:   taskArns,
 	})
@@ -325,20 +329,20 @@ func isDeployed(client *ecs.ECS, service *ecs.Service, targetTdArn string) (bool
 
 	runningCount := 0
 	for _, task := range descOut.Tasks {
-		if aws.StringValue(task.TaskDefinitionArn) == targetTdArn && aws.StringValue(task.LastStatus) == "RUNNING" {
+		if aws.ToString(task.TaskDefinitionArn) == targetTdArn && aws.ToString(task.LastStatus) == "RUNNING" {
 			runningCount++
 		}
 	}
 
-	return runningCount == int(aws.Int64Value(service.DesiredCount)), nil
+	return runningCount == int(service.DesiredCount), nil
 }
 
 // inspectErrors checks service events for errors/warnings containing "unable"
-func inspectErrors(service *ecs.Service, since time.Time, ignoreWarnings bool) (time.Time, error) {
+func inspectErrors(service *types.Service, since time.Time, ignoreWarnings bool) (time.Time, error) {
 	lastTime := since
 	for _, event := range service.Events {
 		if event.CreatedAt != nil && event.CreatedAt.After(since) {
-			msg := aws.StringValue(event.Message)
+			msg := aws.ToString(event.Message)
 			if strings.Contains(strings.ToLower(msg), "unable") {
 				if !ignoreWarnings {
 					return *event.CreatedAt, fmt.Errorf("ERROR: %s", msg)
@@ -354,25 +358,22 @@ func inspectErrors(service *ecs.Service, since time.Time, ignoreWarnings bool) (
 }
 
 // createEcsClient initializes ecs.ECS client with standard session & STS option
-func createEcsClient(parsed *ParsedArgs) (*ecs.ECS, error) {
-	awsConfig := aws.NewConfig()
+func createEcsClient(parsed *ParsedArgs) (*ecs.Client, error) {
+	var opts []func(*config.LoadOptions) error
+
 	if parsed.Region != "" {
-		awsConfig.WithRegion(parsed.Region)
+		opts = append(opts, config.WithRegion(parsed.Region))
 	}
 
 	if parsed.AccessKeyId != "" && parsed.SecretAccessKey != "" {
-		awsConfig.WithCredentials(credentials.NewStaticCredentials(parsed.AccessKeyId, parsed.SecretAccessKey, ""))
+		opts = append(opts, config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(parsed.AccessKeyId, parsed.SecretAccessKey, "")))
 	}
 
-	opts := session.Options{
-		Config:            *awsConfig,
-		SharedConfigState: session.SharedConfigEnable,
-	}
 	if parsed.Profile != "" {
-		opts.Profile = parsed.Profile
+		opts = append(opts, config.WithSharedConfigProfile(parsed.Profile))
 	}
 
-	sess, err := session.NewSessionWithOptions(opts)
+	cfg, err := config.LoadDefaultConfig(context.TODO(), opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -382,12 +383,12 @@ func createEcsClient(parsed *ParsedArgs) (*ecs.ECS, error) {
 		if !strings.HasPrefix(roleArn, "arn:aws:iam::") && parsed.Account != "" {
 			roleArn = fmt.Sprintf("arn:aws:iam::%s:role/%s", parsed.Account, parsed.AssumeRole)
 		}
-		stsClient := sts.New(sess)
-		creds := stscreds.NewCredentialsWithClient(stsClient, roleArn, func(p *stscreds.AssumeRoleProvider) {
-			p.RoleSessionName = "golemDeploy"
+		stsClient := sts.NewFromConfig(cfg)
+		provider := stscreds.NewAssumeRoleProvider(stsClient, roleArn, func(o *stscreds.AssumeRoleOptions) {
+			o.RoleSessionName = "golemDeploy"
 		})
-		sess.Config.Credentials = creds
+		cfg.Credentials = provider
 	}
 
-	return ecs.New(sess), nil
+	return ecs.NewFromConfig(cfg), nil
 }

@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/ecs"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ecs"
+	"github.com/aws/aws-sdk-go-v2/service/ecs/types"
 )
 
 // mutateTaskDefinition applies mutations to the baseline task definition
-func mutateTaskDefinition(baseTd *ecs.TaskDefinition, parsed *ParsedArgs, diffs *[]string) (*ecs.RegisterTaskDefinitionInput, error) {
+func mutateTaskDefinition(baseTd *types.TaskDefinition, parsed *ParsedArgs, diffs *[]string) (*ecs.RegisterTaskDefinitionInput, error) {
 	input := &ecs.RegisterTaskDefinitionInput{
 		Family:                  baseTd.Family,
 		TaskRoleArn:             baseTd.TaskRoleArn,
@@ -28,29 +29,29 @@ func mutateTaskDefinition(baseTd *ecs.TaskDefinition, parsed *ParsedArgs, diffs 
 	if len(parsed.AddContainers) > 0 {
 		var beforeList []string
 		for _, c := range input.ContainerDefinitions {
-			beforeList = append(beforeList, aws.StringValue(c.Name))
+			beforeList = append(beforeList, aws.ToString(c.Name))
 		}
 		for _, addName := range parsed.AddContainers {
 			exists := false
 			for _, c := range input.ContainerDefinitions {
-				if aws.StringValue(c.Name) == addName {
+				if aws.ToString(c.Name) == addName {
 					exists = true
 					break
 				}
 			}
 			if !exists {
-				input.ContainerDefinitions = append(input.ContainerDefinitions, &ecs.ContainerDefinition{
+				input.ContainerDefinitions = append(input.ContainerDefinitions, types.ContainerDefinition{
 					Name:              aws.String(addName),
 					Image:             aws.String("PLACEHOLDER"),
-					Cpu:               aws.Int64(0),
-					MemoryReservation: aws.Int64(128),
+					Cpu:               0,
+					MemoryReservation: aws.Int32(128),
 					Essential:         aws.Bool(true),
 				})
 			}
 		}
 		var afterList []string
 		for _, c := range input.ContainerDefinitions {
-			afterList = append(afterList, aws.StringValue(c.Name))
+			afterList = append(afterList, aws.ToString(c.Name))
 		}
 		if fmt.Sprintf("%v", beforeList) != fmt.Sprintf("%v", afterList) {
 			*diffs = append(*diffs, fmt.Sprintf("Changed containers to: %v (was: %v)", afterList, beforeList))
@@ -60,13 +61,13 @@ func mutateTaskDefinition(baseTd *ecs.TaskDefinition, parsed *ParsedArgs, diffs 
 	if len(parsed.RemoveContainers) > 0 {
 		var beforeList []string
 		for _, c := range input.ContainerDefinitions {
-			beforeList = append(beforeList, aws.StringValue(c.Name))
+			beforeList = append(beforeList, aws.ToString(c.Name))
 		}
-		var filtered []*ecs.ContainerDefinition
+		var filtered []types.ContainerDefinition
 		for _, c := range input.ContainerDefinitions {
 			removed := false
 			for _, rm := range parsed.RemoveContainers {
-				if aws.StringValue(c.Name) == rm {
+				if aws.ToString(c.Name) == rm {
 					removed = true
 					break
 				}
@@ -79,7 +80,7 @@ func mutateTaskDefinition(baseTd *ecs.TaskDefinition, parsed *ParsedArgs, diffs 
 
 		var afterList []string
 		for _, c := range input.ContainerDefinitions {
-			afterList = append(afterList, aws.StringValue(c.Name))
+			afterList = append(afterList, aws.ToString(c.Name))
 		}
 		if fmt.Sprintf("%v", beforeList) != fmt.Sprintf("%v", afterList) {
 			*diffs = append(*diffs, fmt.Sprintf("Changed containers to: %v (was: %v)", afterList, beforeList))
@@ -89,7 +90,7 @@ func mutateTaskDefinition(baseTd *ecs.TaskDefinition, parsed *ParsedArgs, diffs 
 	// Validate container references in CLI overrides
 	allContainerNames := make(map[string]bool)
 	for _, c := range input.ContainerDefinitions {
-		allContainerNames[aws.StringValue(c.Name)] = true
+		allContainerNames[aws.ToString(c.Name)] = true
 	}
 
 	validateContainer := func(name string) error {
@@ -100,8 +101,9 @@ func mutateTaskDefinition(baseTd *ecs.TaskDefinition, parsed *ParsedArgs, diffs 
 	}
 
 	// 2. Apply Container Property Updates
-	for _, c := range input.ContainerDefinitions {
-		cName := aws.StringValue(c.Name)
+	for i := range input.ContainerDefinitions {
+		c := &input.ContainerDefinitions[i]
+		cName := aws.ToString(c.Name)
 
 		// Image Updates
 		for _, imgOver := range parsed.Images {
@@ -109,7 +111,7 @@ func mutateTaskDefinition(baseTd *ecs.TaskDefinition, parsed *ParsedArgs, diffs 
 				if err := validateContainer(cName); err != nil {
 					return nil, err
 				}
-				oldImg := aws.StringValue(c.Image)
+				oldImg := aws.ToString(c.Image)
 				if oldImg != imgOver.Image {
 					*diffs = append(*diffs, fmt.Sprintf("Changed image of container %q to: %q (was: %q)", cName, imgOver.Image, oldImg))
 					c.Image = aws.String(imgOver.Image)
@@ -118,7 +120,7 @@ func mutateTaskDefinition(baseTd *ecs.TaskDefinition, parsed *ParsedArgs, diffs 
 		}
 
 		if parsed.Tag != "" {
-			oldImg := aws.StringValue(c.Image)
+			oldImg := aws.ToString(c.Image)
 			idx := strings.LastIndex(oldImg, ":")
 			var newImg string
 			if idx != -1 {
@@ -154,10 +156,10 @@ func mutateTaskDefinition(baseTd *ecs.TaskDefinition, parsed *ParsedArgs, diffs 
 				if err := validateContainer(cName); err != nil {
 					return nil, err
 				}
-				oldCpu := aws.Int64Value(c.Cpu)
-				if oldCpu != cpuOver.Cpu {
+				oldCpu := c.Cpu
+				if int64(oldCpu) != cpuOver.Cpu {
 					*diffs = append(*diffs, fmt.Sprintf("Changed cpu of container %q to: %d (was: %d)", cName, cpuOver.Cpu, oldCpu))
-					c.Cpu = aws.Int64(cpuOver.Cpu)
+					c.Cpu = int32(cpuOver.Cpu)
 				}
 			}
 		}
@@ -167,10 +169,10 @@ func mutateTaskDefinition(baseTd *ecs.TaskDefinition, parsed *ParsedArgs, diffs 
 				if err := validateContainer(cName); err != nil {
 					return nil, err
 				}
-				oldMem := aws.Int64Value(c.Memory)
-				if oldMem != memOver.Memory {
+				oldMem := aws.ToInt32(c.Memory)
+				if int64(oldMem) != memOver.Memory {
 					*diffs = append(*diffs, fmt.Sprintf("Changed memory of container %q to: %d (was: %d)", cName, memOver.Memory, oldMem))
-					c.Memory = aws.Int64(memOver.Memory)
+					c.Memory = aws.Int32(int32(memOver.Memory))
 				}
 			}
 		}
@@ -180,10 +182,10 @@ func mutateTaskDefinition(baseTd *ecs.TaskDefinition, parsed *ParsedArgs, diffs 
 				if err := validateContainer(cName); err != nil {
 					return nil, err
 				}
-				oldMemRes := aws.Int64Value(c.MemoryReservation)
-				if oldMemRes != memResOver.MemoryReservation {
+				oldMemRes := aws.ToInt32(c.MemoryReservation)
+				if int64(oldMemRes) != memResOver.MemoryReservation {
 					*diffs = append(*diffs, fmt.Sprintf("Changed memoryReservation of container %q to: %d (was: %d)", cName, memResOver.MemoryReservation, oldMemRes))
-					c.MemoryReservation = aws.Int64(memResOver.MemoryReservation)
+					c.MemoryReservation = aws.Int32(int32(memResOver.MemoryReservation))
 				}
 			}
 		}
@@ -194,7 +196,7 @@ func mutateTaskDefinition(baseTd *ecs.TaskDefinition, parsed *ParsedArgs, diffs 
 				if err := validateContainer(cName); err != nil {
 					return nil, err
 				}
-				oldPriv := aws.BoolValue(c.Privileged)
+				oldPriv := aws.ToBool(c.Privileged)
 				if oldPriv != privOver.Privileged {
 					*diffs = append(*diffs, fmt.Sprintf("Changed privileged of container %q to: %t (was: %t)", cName, privOver.Privileged, oldPriv))
 					c.Privileged = aws.Bool(privOver.Privileged)
@@ -207,7 +209,7 @@ func mutateTaskDefinition(baseTd *ecs.TaskDefinition, parsed *ParsedArgs, diffs 
 				if err := validateContainer(cName); err != nil {
 					return nil, err
 				}
-				oldEss := aws.BoolValue(c.Essential)
+				oldEss := aws.ToBool(c.Essential)
 				if oldEss != essOver.Essential {
 					*diffs = append(*diffs, fmt.Sprintf("Changed essential of container %q to: %t (was: %t)", cName, essOver.Essential, oldEss))
 					c.Essential = aws.Bool(essOver.Essential)
@@ -221,12 +223,12 @@ func mutateTaskDefinition(baseTd *ecs.TaskDefinition, parsed *ParsedArgs, diffs 
 				if err := validateContainer(cName); err != nil {
 					return nil, err
 				}
-				newHc := &ecs.HealthCheck{
-					Command:     []*string{aws.String("CMD-SHELL"), aws.String(hcOver.Command)},
-					Interval:    aws.Int64(hcOver.Interval),
-					Timeout:     aws.Int64(hcOver.Timeout),
-					Retries:     aws.Int64(hcOver.Retries),
-					StartPeriod: aws.Int64(hcOver.StartPeriod),
+				newHc := &types.HealthCheck{
+					Command:     []string{"CMD-SHELL", hcOver.Command},
+					Interval:    aws.Int32(int32(hcOver.Interval)),
+					Timeout:     aws.Int32(int32(hcOver.Timeout)),
+					Retries:     aws.Int32(int32(hcOver.Retries)),
+					StartPeriod: aws.Int32(int32(hcOver.StartPeriod)),
 				}
 				*diffs = append(*diffs, fmt.Sprintf("Changed healthCheck of container %q to: Command %q (interval: %d, timeout: %d, retries: %d, start_period: %d)", cName, hcOver.Command, hcOver.Interval, hcOver.Timeout, hcOver.Retries, hcOver.StartPeriod))
 				c.HealthCheck = newHc
@@ -290,7 +292,7 @@ func mutateTaskDefinition(baseTd *ecs.TaskDefinition, parsed *ParsedArgs, diffs 
 
 	// 3. Apply Task Level Property Updates
 	if parsed.TaskCpu != "" {
-		oldCpu := aws.StringValue(input.Cpu)
+		oldCpu := aws.ToString(input.Cpu)
 		if oldCpu != parsed.TaskCpu {
 			*diffs = append(*diffs, fmt.Sprintf("Changed cpu to: %q (was: %q)", parsed.TaskCpu, oldCpu))
 			input.Cpu = aws.String(parsed.TaskCpu)
@@ -298,7 +300,7 @@ func mutateTaskDefinition(baseTd *ecs.TaskDefinition, parsed *ParsedArgs, diffs 
 	}
 
 	if parsed.TaskMemory != "" {
-		oldMem := aws.StringValue(input.Memory)
+		oldMem := aws.ToString(input.Memory)
 		if oldMem != parsed.TaskMemory {
 			*diffs = append(*diffs, fmt.Sprintf("Changed memory to: %q (was: %q)", parsed.TaskMemory, oldMem))
 			input.Memory = aws.String(parsed.TaskMemory)
@@ -306,7 +308,7 @@ func mutateTaskDefinition(baseTd *ecs.TaskDefinition, parsed *ParsedArgs, diffs 
 	}
 
 	if parsed.Role != "" {
-		oldRole := aws.StringValue(input.TaskRoleArn)
+		oldRole := aws.ToString(input.TaskRoleArn)
 		if oldRole != parsed.Role {
 			*diffs = append(*diffs, fmt.Sprintf("Changed role_arn to: %q (was: %q)", parsed.Role, oldRole))
 			input.TaskRoleArn = aws.String(parsed.Role)
@@ -314,7 +316,7 @@ func mutateTaskDefinition(baseTd *ecs.TaskDefinition, parsed *ParsedArgs, diffs 
 	}
 
 	if parsed.ExecutionRole != "" {
-		oldExecRole := aws.StringValue(input.ExecutionRoleArn)
+		oldExecRole := aws.ToString(input.ExecutionRoleArn)
 		if oldExecRole != parsed.ExecutionRole {
 			*diffs = append(*diffs, fmt.Sprintf("Changed execution_role_arn to: %q (was: %q)", parsed.ExecutionRole, oldExecRole))
 			input.ExecutionRoleArn = aws.String(parsed.ExecutionRole)
@@ -323,13 +325,13 @@ func mutateTaskDefinition(baseTd *ecs.TaskDefinition, parsed *ParsedArgs, diffs 
 
 	if parsed.RuntimePlatform != nil {
 		oldPlatform := input.RuntimePlatform
-		newPlatform := &ecs.RuntimePlatform{
-			CpuArchitecture:       aws.String(parsed.RuntimePlatform.CpuArch),
-			OperatingSystemFamily: aws.String(parsed.RuntimePlatform.OsFamily),
+		newPlatform := &types.RuntimePlatform{
+			CpuArchitecture:       types.CPUArchitecture(parsed.RuntimePlatform.CpuArch),
+			OperatingSystemFamily: types.OSFamily(parsed.RuntimePlatform.OsFamily),
 		}
 		oldStr := ""
 		if oldPlatform != nil {
-			oldStr = fmt.Sprintf("%s %s", aws.StringValue(oldPlatform.CpuArchitecture), aws.StringValue(oldPlatform.OperatingSystemFamily))
+			oldStr = fmt.Sprintf("%s %s", oldPlatform.CpuArchitecture, oldPlatform.OperatingSystemFamily)
 		}
 		newStr := fmt.Sprintf("%s %s", parsed.RuntimePlatform.CpuArch, parsed.RuntimePlatform.OsFamily)
 		if oldStr != newStr {
@@ -340,11 +342,11 @@ func mutateTaskDefinition(baseTd *ecs.TaskDefinition, parsed *ParsedArgs, diffs 
 
 	// Volume Updates
 	if len(parsed.Volumes) > 0 {
-		var newVolumes []*ecs.Volume
+		var newVolumes []types.Volume
 		for _, volOver := range parsed.Volumes {
-			newVolumes = append(newVolumes, &ecs.Volume{
+			newVolumes = append(newVolumes, types.Volume{
 				Name: aws.String(volOver.Name),
-				Host: &ecs.HostVolumeProperties{
+				Host: &types.HostVolumeProperties{
 					SourcePath: aws.String(volOver.SourcePath),
 				},
 			})
@@ -354,7 +356,7 @@ func mutateTaskDefinition(baseTd *ecs.TaskDefinition, parsed *ParsedArgs, diffs 
 		for _, existingVol := range input.Volumes {
 			overridden := false
 			for _, nv := range newVolumes {
-				if aws.StringValue(nv.Name) == aws.StringValue(existingVol.Name) {
+				if aws.ToString(nv.Name) == aws.ToString(existingVol.Name) {
 					overridden = true
 					break
 				}
@@ -375,38 +377,34 @@ func mutateTaskDefinition(baseTd *ecs.TaskDefinition, parsed *ParsedArgs, diffs 
 	return input, nil
 }
 
-func parseCommand(cmd string) []*string {
+func parseCommand(cmd string) []string {
 	if strings.HasPrefix(cmd, "[") && strings.HasSuffix(cmd, "]") {
 		// Clean brackets and split by comma or spaces
 		inner := strings.Trim(cmd, "[]")
 		parts := strings.Split(inner, ",")
-		var res []*string
+		var res []string
 		for _, part := range parts {
 			cleaned := strings.Trim(strings.TrimSpace(part), `"'`)
-			res = append(res, aws.String(cleaned))
+			res = append(res, cleaned)
 		}
 		return res
 	}
 	parts := strings.Fields(cmd)
-	var res []*string
+	var res []string
 	for _, part := range parts {
-		res = append(res, aws.String(part))
+		res = append(res, part)
 	}
 	return res
 }
 
-func joinCommand(cmd []*string) string {
-	var parts []string
-	for _, c := range cmd {
-		parts = append(parts, aws.StringValue(c))
-	}
-	return strings.Join(parts, " ")
+func joinCommand(cmd []string) string {
+	return strings.Join(cmd, " ")
 }
 
-func applyEnvironment(container *ecs.ContainerDefinition, overrides []EnvVarOverride, envFiles []EnvFileArg, exclusive bool, diffs *[]string) error {
-	var newEnv []*ecs.KeyValuePair
+func applyEnvironment(container *types.ContainerDefinition, overrides []EnvVarOverride, envFiles []EnvFileArg, exclusive bool, diffs *[]string) error {
+	var newEnv []types.KeyValuePair
 
-	cName := aws.StringValue(container.Name)
+	cName := aws.ToString(container.Name)
 
 	for _, envFile := range envFiles {
 		if envFile.Container == cName {
@@ -415,7 +413,7 @@ func applyEnvironment(container *ecs.ContainerDefinition, overrides []EnvVarOver
 				return err
 			}
 			for k, v := range vars {
-				newEnv = append(newEnv, &ecs.KeyValuePair{
+				newEnv = append(newEnv, types.KeyValuePair{
 					Name:  aws.String(k),
 					Value: aws.String(v),
 				})
@@ -425,28 +423,28 @@ func applyEnvironment(container *ecs.ContainerDefinition, overrides []EnvVarOver
 
 	for _, over := range overrides {
 		if over.Container == cName {
-			var temp []*ecs.KeyValuePair
+			var temp []types.KeyValuePair
 			for _, kv := range newEnv {
-				if aws.StringValue(kv.Name) != over.Name {
+				if aws.ToString(kv.Name) != over.Name {
 					temp = append(temp, kv)
 				}
 			}
 			newEnv = temp
-			newEnv = append(newEnv, &ecs.KeyValuePair{
+			newEnv = append(newEnv, types.KeyValuePair{
 				Name:  aws.String(over.Name),
 				Value: aws.String(over.Value),
 			})
 		}
 	}
 
-	var merged []*ecs.KeyValuePair
+	var merged []types.KeyValuePair
 	if exclusive {
 		merged = newEnv
 	} else {
 		for _, existing := range container.Environment {
 			replaced := false
 			for _, ne := range newEnv {
-				if aws.StringValue(ne.Name) == aws.StringValue(existing.Name) {
+				if aws.ToString(ne.Name) == aws.ToString(existing.Name) {
 					replaced = true
 					break
 				}
@@ -460,11 +458,11 @@ func applyEnvironment(container *ecs.ContainerDefinition, overrides []EnvVarOver
 
 	oldMap := make(map[string]string)
 	for _, kv := range container.Environment {
-		oldMap[aws.StringValue(kv.Name)] = aws.StringValue(kv.Value)
+		oldMap[aws.ToString(kv.Name)] = aws.ToString(kv.Value)
 	}
 	newMap := make(map[string]string)
 	for _, kv := range merged {
-		newMap[aws.StringValue(kv.Name)] = aws.StringValue(kv.Value)
+		newMap[aws.ToString(kv.Name)] = aws.ToString(kv.Value)
 	}
 
 	for k, v := range newMap {
@@ -483,9 +481,9 @@ func applyEnvironment(container *ecs.ContainerDefinition, overrides []EnvVarOver
 	return nil
 }
 
-func applySecrets(container *ecs.ContainerDefinition, overrides []SecretOverride, secretsFiles []EnvFileArg, exclusive bool, diffs *[]string) error {
-	var newSecrets []*ecs.Secret
-	cName := aws.StringValue(container.Name)
+func applySecrets(container *types.ContainerDefinition, overrides []SecretOverride, secretsFiles []EnvFileArg, exclusive bool, diffs *[]string) error {
+	var newSecrets []types.Secret
+	cName := aws.ToString(container.Name)
 
 	for _, sFile := range secretsFiles {
 		if sFile.Container == cName {
@@ -494,7 +492,7 @@ func applySecrets(container *ecs.ContainerDefinition, overrides []SecretOverride
 				return err
 			}
 			for k, v := range vars {
-				newSecrets = append(newSecrets, &ecs.Secret{
+				newSecrets = append(newSecrets, types.Secret{
 					Name:      aws.String(k),
 					ValueFrom: aws.String(v),
 				})
@@ -504,28 +502,28 @@ func applySecrets(container *ecs.ContainerDefinition, overrides []SecretOverride
 
 	for _, over := range overrides {
 		if over.Container == cName {
-			var temp []*ecs.Secret
+			var temp []types.Secret
 			for _, s := range newSecrets {
-				if aws.StringValue(s.Name) != over.Name {
+				if aws.ToString(s.Name) != over.Name {
 					temp = append(temp, s)
 				}
 			}
 			newSecrets = temp
-			newSecrets = append(newSecrets, &ecs.Secret{
+			newSecrets = append(newSecrets, types.Secret{
 				Name:      aws.String(over.Name),
 				ValueFrom: aws.String(over.ValueFrom),
 			})
 		}
 	}
 
-	var merged []*ecs.Secret
+	var merged []types.Secret
 	if exclusive {
 		merged = newSecrets
 	} else {
 		for _, existing := range container.Secrets {
 			replaced := false
 			for _, ns := range newSecrets {
-				if aws.StringValue(ns.Name) == aws.StringValue(existing.Name) {
+				if aws.ToString(ns.Name) == aws.ToString(existing.Name) {
 					replaced = true
 					break
 				}
@@ -539,11 +537,11 @@ func applySecrets(container *ecs.ContainerDefinition, overrides []SecretOverride
 
 	oldMap := make(map[string]string)
 	for _, s := range container.Secrets {
-		oldMap[aws.StringValue(s.Name)] = aws.StringValue(s.ValueFrom)
+		oldMap[aws.ToString(s.Name)] = aws.ToString(s.ValueFrom)
 	}
 	newMap := make(map[string]string)
 	for _, s := range merged {
-		newMap[aws.StringValue(s.Name)] = aws.StringValue(s.ValueFrom)
+		newMap[aws.ToString(s.Name)] = aws.ToString(s.ValueFrom)
 	}
 
 	for k, v := range newMap {
@@ -562,21 +560,21 @@ func applySecrets(container *ecs.ContainerDefinition, overrides []SecretOverride
 	return nil
 }
 
-func applyDockerLabels(container *ecs.ContainerDefinition, overrides []DockerLabelArg, exclusive bool, diffs *[]string) error {
-	cName := aws.StringValue(container.Name)
-	newLabels := make(map[string]*string)
+func applyDockerLabels(container *types.ContainerDefinition, overrides []DockerLabelArg, exclusive bool, diffs *[]string) error {
+	cName := aws.ToString(container.Name)
+	newLabels := make(map[string]string)
 
 	for _, over := range overrides {
 		if over.Container == cName {
-			newLabels[over.Name] = aws.String(over.Value)
+			newLabels[over.Name] = over.Value
 		}
 	}
 
-	var merged map[string]*string
+	var merged map[string]string
 	if exclusive {
 		merged = newLabels
 	} else {
-		merged = make(map[string]*string)
+		merged = make(map[string]string)
 		for k, v := range container.DockerLabels {
 			merged[k] = v
 		}
@@ -587,11 +585,11 @@ func applyDockerLabels(container *ecs.ContainerDefinition, overrides []DockerLab
 
 	oldMap := make(map[string]string)
 	for k, v := range container.DockerLabels {
-		oldMap[k] = aws.StringValue(v)
+		oldMap[k] = v
 	}
 	newMap := make(map[string]string)
 	for k, v := range merged {
-		newMap[k] = aws.StringValue(v)
+		newMap[k] = v
 	}
 
 	for k, v := range newMap {
@@ -610,27 +608,27 @@ func applyDockerLabels(container *ecs.ContainerDefinition, overrides []DockerLab
 	return nil
 }
 
-func applyS3EnvFiles(container *ecs.ContainerDefinition, overrides []S3EnvFileArg, exclusive bool, diffs *[]string) error {
-	cName := aws.StringValue(container.Name)
-	var newFiles []*ecs.EnvironmentFile
+func applyS3EnvFiles(container *types.ContainerDefinition, overrides []S3EnvFileArg, exclusive bool, diffs *[]string) error {
+	cName := aws.ToString(container.Name)
+	var newFiles []types.EnvironmentFile
 
 	for _, over := range overrides {
 		if over.Container == cName {
-			newFiles = append(newFiles, &ecs.EnvironmentFile{
-				Type:  aws.String("s3"),
+			newFiles = append(newFiles, types.EnvironmentFile{
+				Type:  types.EnvironmentFileTypeS3,
 				Value: aws.String(over.S3Arn),
 			})
 		}
 	}
 
-	var merged []*ecs.EnvironmentFile
+	var merged []types.EnvironmentFile
 	if exclusive {
 		merged = newFiles
 	} else {
 		for _, existing := range container.EnvironmentFiles {
 			replaced := false
 			for _, nf := range newFiles {
-				if aws.StringValue(nf.Value) == aws.StringValue(existing.Value) {
+				if aws.ToString(nf.Value) == aws.ToString(existing.Value) {
 					replaced = true
 					break
 				}
@@ -652,28 +650,28 @@ func applyS3EnvFiles(container *ecs.ContainerDefinition, overrides []S3EnvFileAr
 	return nil
 }
 
-func applyPortMappings(container *ecs.ContainerDefinition, overrides []PortOverride, exclusive bool, diffs *[]string) error {
-	cName := aws.StringValue(container.Name)
-	var newPorts []*ecs.PortMapping
+func applyPortMappings(container *types.ContainerDefinition, overrides []PortOverride, exclusive bool, diffs *[]string) error {
+	cName := aws.ToString(container.Name)
+	var newPorts []types.PortMapping
 
 	for _, over := range overrides {
 		if over.Container == cName {
-			newPorts = append(newPorts, &ecs.PortMapping{
-				ContainerPort: aws.Int64(over.ContainerPort),
-				HostPort:      aws.Int64(over.HostPort),
-				Protocol:      aws.String("tcp"),
+			newPorts = append(newPorts, types.PortMapping{
+				ContainerPort: aws.Int32(int32(over.ContainerPort)),
+				HostPort:      aws.Int32(int32(over.HostPort)),
+				Protocol:      types.TransportProtocolTcp,
 			})
 		}
 	}
 
-	var merged []*ecs.PortMapping
+	var merged []types.PortMapping
 	if exclusive {
 		merged = newPorts
 	} else {
 		for _, existing := range container.PortMappings {
 			overridden := false
 			for _, np := range newPorts {
-				if aws.Int64Value(np.ContainerPort) == aws.Int64Value(existing.ContainerPort) {
+				if aws.ToInt32(np.ContainerPort) == aws.ToInt32(existing.ContainerPort) {
 					overridden = true
 					break
 				}
@@ -695,13 +693,13 @@ func applyPortMappings(container *ecs.ContainerDefinition, overrides []PortOverr
 	return nil
 }
 
-func applyMountPoints(container *ecs.ContainerDefinition, overrides []MountOverride, exclusive bool, diffs *[]string) error {
-	cName := aws.StringValue(container.Name)
-	var newMounts []*ecs.MountPoint
+func applyMountPoints(container *types.ContainerDefinition, overrides []MountOverride, exclusive bool, diffs *[]string) error {
+	cName := aws.ToString(container.Name)
+	var newMounts []types.MountPoint
 
 	for _, over := range overrides {
 		if over.Container == cName {
-			newMounts = append(newMounts, &ecs.MountPoint{
+			newMounts = append(newMounts, types.MountPoint{
 				SourceVolume:  aws.String(over.SourceVolume),
 				ContainerPath: aws.String(over.Path),
 				ReadOnly:      aws.Bool(false),
@@ -709,14 +707,14 @@ func applyMountPoints(container *ecs.ContainerDefinition, overrides []MountOverr
 		}
 	}
 
-	var merged []*ecs.MountPoint
+	var merged []types.MountPoint
 	if exclusive {
 		merged = newMounts
 	} else {
 		for _, existing := range container.MountPoints {
 			overridden := false
 			for _, nm := range newMounts {
-				if aws.StringValue(nm.SourceVolume) == aws.StringValue(existing.SourceVolume) {
+				if aws.ToString(nm.SourceVolume) == aws.ToString(existing.SourceVolume) {
 					overridden = true
 					break
 				}
@@ -738,18 +736,18 @@ func applyMountPoints(container *ecs.ContainerDefinition, overrides []MountOverr
 	return nil
 }
 
-func applyLogConfiguration(container *ecs.ContainerDefinition, overrides []LogOverride, diffs *[]string) error {
-	cName := aws.StringValue(container.Name)
+func applyLogConfiguration(container *types.ContainerDefinition, overrides []LogOverride, diffs *[]string) error {
+	cName := aws.ToString(container.Name)
 
 	var logDrv string
-	options := make(map[string]*string)
+	options := make(map[string]string)
 
 	hasOverride := false
 	for _, over := range overrides {
 		if over.Container == cName {
 			hasOverride = true
 			logDrv = over.LogDriver
-			options[over.Name] = aws.String(over.Value)
+			options[over.Name] = over.Value
 		}
 	}
 
@@ -757,14 +755,14 @@ func applyLogConfiguration(container *ecs.ContainerDefinition, overrides []LogOv
 		return nil
 	}
 
-	var oldLog *ecs.LogConfiguration
+	var oldLog *types.LogConfiguration
 	if container.LogConfiguration != nil {
 		oldLog = container.LogConfiguration
 	} else {
-		oldLog = &ecs.LogConfiguration{}
+		oldLog = &types.LogConfiguration{}
 	}
 
-	mergedOptions := make(map[string]*string)
+	mergedOptions := make(map[string]string)
 	for k, v := range oldLog.Options {
 		mergedOptions[k] = v
 	}
@@ -772,12 +770,12 @@ func applyLogConfiguration(container *ecs.ContainerDefinition, overrides []LogOv
 		mergedOptions[k] = v
 	}
 
-	newLog := &ecs.LogConfiguration{
-		LogDriver: aws.String(logDrv),
+	newLog := &types.LogConfiguration{
+		LogDriver: types.LogDriver(logDrv),
 		Options:   mergedOptions,
 	}
 
-	oldStr := fmt.Sprintf("Driver: %s, Options: %v", aws.StringValue(oldLog.LogDriver), oldLog.Options)
+	oldStr := fmt.Sprintf("Driver: %s, Options: %v", oldLog.LogDriver, oldLog.Options)
 	newStr := fmt.Sprintf("Driver: %s, Options: %v", logDrv, mergedOptions)
 	if oldStr != newStr {
 		*diffs = append(*diffs, fmt.Sprintf("Changed logConfiguration of container %q to: %s (was: %s)", cName, newStr, oldStr))
@@ -787,28 +785,28 @@ func applyLogConfiguration(container *ecs.ContainerDefinition, overrides []LogOv
 	return nil
 }
 
-func applyUlimits(container *ecs.ContainerDefinition, overrides []UlimitOverride, exclusive bool, diffs *[]string) error {
-	cName := aws.StringValue(container.Name)
-	var newUlimits []*ecs.Ulimit
+func applyUlimits(container *types.ContainerDefinition, overrides []UlimitOverride, exclusive bool, diffs *[]string) error {
+	cName := aws.ToString(container.Name)
+	var newUlimits []types.Ulimit
 
 	for _, over := range overrides {
 		if over.Container == cName {
-			newUlimits = append(newUlimits, &ecs.Ulimit{
-				Name:      aws.String(over.Name),
-				SoftLimit: aws.Int64(over.SoftLimit),
-				HardLimit: aws.Int64(over.HardLimit),
+			newUlimits = append(newUlimits, types.Ulimit{
+				Name:      types.UlimitName(over.Name),
+				SoftLimit: int32(over.SoftLimit),
+				HardLimit: int32(over.HardLimit),
 			})
 		}
 	}
 
-	var merged []*ecs.Ulimit
+	var merged []types.Ulimit
 	if exclusive {
 		merged = newUlimits
 	} else {
 		for _, existing := range container.Ulimits {
 			overridden := false
 			for _, nu := range newUlimits {
-				if aws.StringValue(nu.Name) == aws.StringValue(existing.Name) {
+				if nu.Name == existing.Name {
 					overridden = true
 					break
 				}
@@ -830,27 +828,27 @@ func applyUlimits(container *ecs.ContainerDefinition, overrides []UlimitOverride
 	return nil
 }
 
-func applySysctls(container *ecs.ContainerDefinition, overrides []SysctlOverride, exclusive bool, diffs *[]string) error {
-	cName := aws.StringValue(container.Name)
-	var newSysctls []*ecs.SystemControl
+func applySysctls(container *types.ContainerDefinition, overrides []SysctlOverride, exclusive bool, diffs *[]string) error {
+	cName := aws.ToString(container.Name)
+	var newSysctls []types.SystemControl
 
 	for _, over := range overrides {
 		if over.Container == cName {
-			newSysctls = append(newSysctls, &ecs.SystemControl{
+			newSysctls = append(newSysctls, types.SystemControl{
 				Namespace: aws.String(over.Namespace),
 				Value:     aws.String(over.Value),
 			})
 		}
 	}
 
-	var merged []*ecs.SystemControl
+	var merged []types.SystemControl
 	if exclusive {
 		merged = newSysctls
 	} else {
 		for _, existing := range container.SystemControls {
 			overridden := false
 			for _, ns := range newSysctls {
-				if aws.StringValue(ns.Namespace) == aws.StringValue(existing.Namespace) {
+				if aws.ToString(ns.Namespace) == aws.ToString(existing.Namespace) {
 					overridden = true
 					break
 				}

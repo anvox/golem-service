@@ -1,13 +1,15 @@
 package service_config
 
 import (
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/ssm"
-	log "github.com/sirupsen/logrus"
-
+	"context"
 	"fmt"
 	"strings"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	"github.com/aws/aws-sdk-go-v2/service/ssm/types"
+	log "github.com/sirupsen/logrus"
 )
 
 const DEFAULT_PARAM_DESCRIPTION = "Parameter set by golem"
@@ -24,7 +26,11 @@ type Configuration struct {
 }
 
 func List(identifier Identifier) ([]Configuration, error) {
-	ssmClient := ssm.New(session.New())
+	cfg, err := config.LoadDefaultConfig(context.TODO())
+	if err != nil {
+		return []Configuration{}, err
+	}
+	ssmClient := ssm.NewFromConfig(cfg)
 	clusterPrefix := ssmKeyPrefix(identifier)
 	params := &ssm.GetParametersByPathInput{
 		Path:           aws.String(clusterPrefix),
@@ -32,36 +38,35 @@ func List(identifier Identifier) ([]Configuration, error) {
 		WithDecryption: aws.Bool(true),
 	}
 	mapConfigs := make(map[string]Configuration)
-	err := ssmClient.GetParametersByPathPages(params,
-		func(page *ssm.GetParametersByPathOutput, lastPage bool) bool {
-			for _, param := range page.Parameters {
-				envName := parseEnvName(identifier, aws.StringValue(param.Name))
-				if envName == "" {
-					continue
-				}
-
-				env, exists := mapConfigs[envName]
-				if exists {
-					// The fact is service keys are always longer than its corresponding cluster keys
-					envKey := aws.StringValue(param.Name)
-					if len(envKey) > len(env.Name) {
-						mapConfigs[envName] = Configuration{
-							Name:  envKey,
-							Value: aws.StringValue(param.Value),
-						}
-					}
-				} else {
-					mapConfigs[envName] = Configuration{
-						Name:  aws.StringValue(param.Name),
-						Value: aws.StringValue(param.Value),
-					}
-				}
+	paginator := ssm.NewGetParametersByPathPaginator(ssmClient, params)
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(context.TODO())
+		if err != nil {
+			return []Configuration{}, err
+		}
+		for _, param := range page.Parameters {
+			envName := parseEnvName(identifier, aws.ToString(param.Name))
+			if envName == "" {
+				continue
 			}
 
-			return !lastPage
-		})
-	if err != nil {
-		return []Configuration{}, err
+			env, exists := mapConfigs[envName]
+			if exists {
+				// The fact is service keys are always longer than its corresponding cluster keys
+				envKey := aws.ToString(param.Name)
+				if len(envKey) > len(env.Name) {
+					mapConfigs[envName] = Configuration{
+						Name:  envKey,
+						Value: aws.ToString(param.Value),
+					}
+				}
+			} else {
+				mapConfigs[envName] = Configuration{
+					Name:  aws.ToString(param.Name),
+					Value: aws.ToString(param.Value),
+				}
+			}
+		}
 	}
 
 	configs := []Configuration{}
@@ -75,7 +80,12 @@ func List(identifier Identifier) ([]Configuration, error) {
 }
 
 func SetEnv(identifier Identifier, configurations []Configuration) {
-	ssmClient := ssm.New(session.New())
+	cfg, err := config.LoadDefaultConfig(context.TODO())
+	if err != nil {
+		log.Infof("Failed to load AWS config: %v", err)
+		return
+	}
+	ssmClient := ssm.NewFromConfig(cfg)
 	prefix := ssmKeyPrefix(identifier)
 	if identifier.Service != "" {
 		prefix = prefix + identifier.Service + "/"
@@ -85,32 +95,32 @@ func SetEnv(identifier Identifier, configurations []Configuration) {
 	if identifier.Service != "" {
 		application = identifier.Service
 	}
-	tags := []*ssm.Tag{
-		&ssm.Tag{
+	tags := []types.Tag{
+		{
 			Key:   aws.String("Environment"),
 			Value: aws.String(identifier.Environment),
 		},
-		&ssm.Tag{
+		{
 			Key:   aws.String("Owner"),
 			Value: aws.String("golem"),
 		},
-		&ssm.Tag{
+		{
 			Key:   aws.String("CreatedBy"),
 			Value: aws.String("golem"),
 		},
-		&ssm.Tag{
+		{
 			Key:   aws.String("Application"),
 			Value: aws.String(application),
 		},
-		&ssm.Tag{
+		{
 			Key:   aws.String("Stack"),
 			Value: aws.String(identifier.Stack),
 		},
 	}
 	for _, envVar := range configurations {
-		result, error := ssmClient.GetParameters(&ssm.GetParametersInput{
-			Names: []*string{
-				aws.String(prefix + envVar.Name),
+		result, error := ssmClient.GetParameters(context.TODO(), &ssm.GetParametersInput{
+			Names: []string{
+				prefix + envVar.Name,
 			},
 			WithDecryption: aws.Bool(true),
 		})
@@ -120,25 +130,28 @@ func SetEnv(identifier Identifier, configurations []Configuration) {
 
 		if result != nil && len(result.Parameters) > 0 {
 			if envVar.Value != "" {
-				_, error := ssmClient.PutParameter(&ssm.PutParameterInput{
+				_, error := ssmClient.PutParameter(context.TODO(), &ssm.PutParameterInput{
 					Name:        aws.String(prefix + envVar.Name),
 					Description: aws.String(DEFAULT_PARAM_DESCRIPTION),
 					Value:       aws.String(envVar.Value),
-					Type:        aws.String("String"),
+					Type:        types.ParameterTypeString,
 					Overwrite:   aws.Bool(true),
 				})
 				if error != nil {
 					log.Infof("Failed to PutParameter %s:\n%+v\n", envVar.Name, error)
 				} else {
 					param := result.Parameters[0]
-					ssmClient.AddTagsToResource(&ssm.AddTagsToResourceInput{
+					_, error = ssmClient.AddTagsToResource(context.TODO(), &ssm.AddTagsToResourceInput{
 						ResourceId:   param.ARN,
-						ResourceType: aws.String("String"),
+						ResourceType: types.ResourceTypeForTaggingParameter,
 						Tags:         tags,
 					})
+					if error != nil {
+						log.Infof("Failed to AddTagsToResource %s:\n%+v\n", envVar.Name, error)
+					}
 				}
 			} else {
-				_, error := ssmClient.DeleteParameter(&ssm.DeleteParameterInput{
+				_, error := ssmClient.DeleteParameter(context.TODO(), &ssm.DeleteParameterInput{
 					Name: aws.String(prefix + envVar.Name),
 				})
 				if error != nil {
@@ -146,11 +159,11 @@ func SetEnv(identifier Identifier, configurations []Configuration) {
 				}
 			}
 		} else if envVar.Value != "" {
-			_, error := ssmClient.PutParameter(&ssm.PutParameterInput{
+			_, error := ssmClient.PutParameter(context.TODO(), &ssm.PutParameterInput{
 				Name:        aws.String(prefix + envVar.Name),
 				Description: aws.String(DEFAULT_PARAM_DESCRIPTION),
 				Value:       aws.String(envVar.Value),
-				Type:        aws.String("String"),
+				Type:        types.ParameterTypeString,
 				Tags:        tags,
 			})
 			if error != nil {
@@ -161,16 +174,20 @@ func SetEnv(identifier Identifier, configurations []Configuration) {
 }
 
 func GetEnv(identifier Identifier, configNames []string) ([]Configuration, error) {
-	paramKeys := []*string{}
+	paramKeys := []string{}
 	prefix := ssmKeyPrefix(identifier)
 	for _, paramName := range configNames {
-		paramKeys = append(paramKeys, aws.String(prefix+paramName))
+		paramKeys = append(paramKeys, prefix+paramName)
 		if identifier.Service != "" {
-			paramKeys = append(paramKeys, aws.String(prefix+identifier.Service+"/"+paramName))
+			paramKeys = append(paramKeys, prefix+identifier.Service+"/"+paramName)
 		}
 	}
 
-	ssmClient := ssm.New(session.New())
+	cfg, err := config.LoadDefaultConfig(context.TODO())
+	if err != nil {
+		return []Configuration{}, err
+	}
+	ssmClient := ssm.NewFromConfig(cfg)
 	mapConfigs := make(map[string]Configuration)
 	for i := 0; i < len(paramKeys); i += 10 {
 		tail := i + 10
@@ -179,7 +196,7 @@ func GetEnv(identifier Identifier, configNames []string) ([]Configuration, error
 		}
 		chunks := paramKeys[i:tail]
 
-		params, error := ssmClient.GetParameters(&ssm.GetParametersInput{
+		params, error := ssmClient.GetParameters(context.TODO(), &ssm.GetParametersInput{
 			Names:          chunks,
 			WithDecryption: aws.Bool(true),
 		})
@@ -187,7 +204,7 @@ func GetEnv(identifier Identifier, configNames []string) ([]Configuration, error
 			return []Configuration{}, error
 		}
 		for _, param := range params.Parameters {
-			envName := parseEnvName(identifier, aws.StringValue(param.Name))
+			envName := parseEnvName(identifier, aws.ToString(param.Name))
 			if envName == "" {
 				continue
 			}
@@ -195,17 +212,17 @@ func GetEnv(identifier Identifier, configNames []string) ([]Configuration, error
 			env, exists := mapConfigs[envName]
 			if exists {
 				// The fact is service keys are always longer than its corresponding cluster keys
-				envKey := aws.StringValue(param.Name)
+				envKey := aws.ToString(param.Name)
 				if len(envKey) > len(env.Name) {
 					mapConfigs[envName] = Configuration{
 						Name:  envKey,
-						Value: aws.StringValue(param.Value),
+						Value: aws.ToString(param.Value),
 					}
 				}
 			} else {
 				mapConfigs[envName] = Configuration{
-					Name:  aws.StringValue(param.Name),
-					Value: aws.StringValue(param.Value),
+					Name:  aws.ToString(param.Name),
+					Value: aws.ToString(param.Value),
 				}
 			}
 		}
