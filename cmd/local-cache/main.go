@@ -220,6 +220,11 @@ func runSave(key string, paths []string, customCacheDir string) error {
 	}
 	exactCache := filepath.Join(cacheDir, exactCacheFilename)
 
+	if fileExists(exactCache) {
+		fmt.Printf("⚡ Cache file already exists for key %q. Skipping save.\n", key)
+		return nil
+	}
+
 	// Clean, deduplicate, and validate existing paths
 	seen := make(map[string]bool)
 	var validPaths []string

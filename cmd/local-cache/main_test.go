@@ -121,7 +121,6 @@ func TestSaveAndRestoreMultipleDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Change to workDir so relative paths are saved cleanly
 	origDir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -135,6 +134,11 @@ func TestSaveAndRestoreMultipleDirectories(t *testing.T) {
 	pathsToSave := []string{"dirA", "dirB/sub", "nonexistent-dir"}
 	if err := runSave("multi-test-123", pathsToSave, cacheDir); err != nil {
 		t.Fatalf("runSave failed: %v", err)
+	}
+
+	// Test saving again when cache file already exists -> should skip
+	if err := runSave("multi-test-123", pathsToSave, cacheDir); err != nil {
+		t.Fatalf("runSave failed when cache exists: %v", err)
 	}
 
 	// Remove source files
