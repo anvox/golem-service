@@ -33,7 +33,12 @@ build_nextjs_s3_deploy:
 	env GOOS=darwin GOARCH=amd64 go build -o ./dist/nextjs-s3-deploy-darwin-amd64 ./cmd/nextjs-s3-deploy/*.go
 	env GOOS=linux GOARCH=amd64 go build -o ./dist/nextjs-s3-deploy-linux-amd64 ./cmd/nextjs-s3-deploy/*.go
 	chmod a+x ./dist/nextjs-s3-deploy*
-build: build_config_command build_ps_command build_entrypoint build_exec build_deploy_command build_nextjs_s3_deploy
+build_local_cache:
+	go build -o ./dist/golem-local-cache ./cmd/local-cache/*.go
+	env GOOS=darwin GOARCH=amd64 go build -o ./dist/golem-local-cache-darwin-amd64 ./cmd/local-cache/*.go
+	env GOOS=linux GOARCH=amd64 go build -o ./dist/golem-local-cache-linux-amd64 ./cmd/local-cache/*.go
+	chmod a+x ./dist/golem-local-cache*
+build: build_config_command build_ps_command build_entrypoint build_exec build_deploy_command build_nextjs_s3_deploy build_local_cache
 deploy: build
 	echo "Please push to github release manually"
 clean:
