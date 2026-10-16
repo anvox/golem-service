@@ -63,6 +63,20 @@ func mutateTaskDefinition(baseTd *types.TaskDefinition, parsed *ParsedArgs, diff
 		for _, c := range input.ContainerDefinitions {
 			beforeList = append(beforeList, aws.ToString(c.Name))
 		}
+
+		for _, rm := range parsed.RemoveContainers {
+			exists := false
+			for _, c := range input.ContainerDefinitions {
+				if aws.ToString(c.Name) == rm {
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				return nil, fmt.Errorf("❌ container %q not found in task definition", rm)
+			}
+		}
+
 		var filtered []types.ContainerDefinition
 		for _, c := range input.ContainerDefinitions {
 			removed := false
@@ -95,9 +109,105 @@ func mutateTaskDefinition(baseTd *types.TaskDefinition, parsed *ParsedArgs, diff
 
 	validateContainer := func(name string) error {
 		if !allContainerNames[name] {
-			return fmt.Errorf("Unknown container: %s", name)
+			return fmt.Errorf("❌ container %q not found in task definition", name)
 		}
 		return nil
+	}
+
+	for _, o := range parsed.Images {
+		if err := validateContainer(o.Container); err != nil {
+			return nil, err
+		}
+	}
+	for _, o := range parsed.Commands {
+		if err := validateContainer(o.Container); err != nil {
+			return nil, err
+		}
+	}
+	for _, o := range parsed.CpuOverrides {
+		if err := validateContainer(o.Container); err != nil {
+			return nil, err
+		}
+	}
+	for _, o := range parsed.MemoryOverrides {
+		if err := validateContainer(o.Container); err != nil {
+			return nil, err
+		}
+	}
+	for _, o := range parsed.MemReservationOverrides {
+		if err := validateContainer(o.Container); err != nil {
+			return nil, err
+		}
+	}
+	for _, o := range parsed.PrivilegedOverrides {
+		if err := validateContainer(o.Container); err != nil {
+			return nil, err
+		}
+	}
+	for _, o := range parsed.EssentialOverrides {
+		if err := validateContainer(o.Container); err != nil {
+			return nil, err
+		}
+	}
+	for _, o := range parsed.HealthCheckOverrides {
+		if err := validateContainer(o.Container); err != nil {
+			return nil, err
+		}
+	}
+	for _, o := range parsed.EnvOverrides {
+		if err := validateContainer(o.Container); err != nil {
+			return nil, err
+		}
+	}
+	for _, o := range parsed.EnvFiles {
+		if err := validateContainer(o.Container); err != nil {
+			return nil, err
+		}
+	}
+	for _, o := range parsed.S3EnvFiles {
+		if err := validateContainer(o.Container); err != nil {
+			return nil, err
+		}
+	}
+	for _, o := range parsed.SecretOverrides {
+		if err := validateContainer(o.Container); err != nil {
+			return nil, err
+		}
+	}
+	for _, o := range parsed.SecretsEnvFiles {
+		if err := validateContainer(o.Container); err != nil {
+			return nil, err
+		}
+	}
+	for _, o := range parsed.DockerLabels {
+		if err := validateContainer(o.Container); err != nil {
+			return nil, err
+		}
+	}
+	for _, o := range parsed.Ulimits {
+		if err := validateContainer(o.Container); err != nil {
+			return nil, err
+		}
+	}
+	for _, o := range parsed.Sysctls {
+		if err := validateContainer(o.Container); err != nil {
+			return nil, err
+		}
+	}
+	for _, o := range parsed.Ports {
+		if err := validateContainer(o.Container); err != nil {
+			return nil, err
+		}
+	}
+	for _, o := range parsed.Mounts {
+		if err := validateContainer(o.Container); err != nil {
+			return nil, err
+		}
+	}
+	for _, o := range parsed.Logs {
+		if err := validateContainer(o.Container); err != nil {
+			return nil, err
+		}
 	}
 
 	// 2. Apply Container Property Updates
@@ -108,9 +218,6 @@ func mutateTaskDefinition(baseTd *types.TaskDefinition, parsed *ParsedArgs, diff
 		// Image Updates
 		for _, imgOver := range parsed.Images {
 			if imgOver.Container == cName {
-				if err := validateContainer(cName); err != nil {
-					return nil, err
-				}
 				oldImg := aws.ToString(c.Image)
 				if oldImg != imgOver.Image {
 					*diffs = append(*diffs, fmt.Sprintf("Changed image of container %q to: %q (was: %q)", cName, imgOver.Image, oldImg))
@@ -137,9 +244,6 @@ func mutateTaskDefinition(baseTd *types.TaskDefinition, parsed *ParsedArgs, diff
 		// Command Updates
 		for _, cmdOver := range parsed.Commands {
 			if cmdOver.Container == cName {
-				if err := validateContainer(cName); err != nil {
-					return nil, err
-				}
 				newCmd := parseCommand(cmdOver.Command)
 				oldCmdJoined := joinCommand(c.Command)
 				newCmdJoined := joinCommand(newCmd)
@@ -153,9 +257,6 @@ func mutateTaskDefinition(baseTd *types.TaskDefinition, parsed *ParsedArgs, diff
 		// CPU & Memory Override
 		for _, cpuOver := range parsed.CpuOverrides {
 			if cpuOver.Container == cName {
-				if err := validateContainer(cName); err != nil {
-					return nil, err
-				}
 				oldCpu := c.Cpu
 				if int64(oldCpu) != cpuOver.Cpu {
 					*diffs = append(*diffs, fmt.Sprintf("Changed cpu of container %q to: %d (was: %d)", cName, cpuOver.Cpu, oldCpu))
@@ -166,9 +267,6 @@ func mutateTaskDefinition(baseTd *types.TaskDefinition, parsed *ParsedArgs, diff
 
 		for _, memOver := range parsed.MemoryOverrides {
 			if memOver.Container == cName {
-				if err := validateContainer(cName); err != nil {
-					return nil, err
-				}
 				oldMem := aws.ToInt32(c.Memory)
 				if int64(oldMem) != memOver.Memory {
 					*diffs = append(*diffs, fmt.Sprintf("Changed memory of container %q to: %d (was: %d)", cName, memOver.Memory, oldMem))
@@ -179,9 +277,6 @@ func mutateTaskDefinition(baseTd *types.TaskDefinition, parsed *ParsedArgs, diff
 
 		for _, memResOver := range parsed.MemReservationOverrides {
 			if memResOver.Container == cName {
-				if err := validateContainer(cName); err != nil {
-					return nil, err
-				}
 				oldMemRes := aws.ToInt32(c.MemoryReservation)
 				if int64(oldMemRes) != memResOver.MemoryReservation {
 					*diffs = append(*diffs, fmt.Sprintf("Changed memoryReservation of container %q to: %d (was: %d)", cName, memResOver.MemoryReservation, oldMemRes))
@@ -193,9 +288,6 @@ func mutateTaskDefinition(baseTd *types.TaskDefinition, parsed *ParsedArgs, diff
 		// Privileged & Essential
 		for _, privOver := range parsed.PrivilegedOverrides {
 			if privOver.Container == cName {
-				if err := validateContainer(cName); err != nil {
-					return nil, err
-				}
 				oldPriv := aws.ToBool(c.Privileged)
 				if oldPriv != privOver.Privileged {
 					*diffs = append(*diffs, fmt.Sprintf("Changed privileged of container %q to: %t (was: %t)", cName, privOver.Privileged, oldPriv))
@@ -206,9 +298,6 @@ func mutateTaskDefinition(baseTd *types.TaskDefinition, parsed *ParsedArgs, diff
 
 		for _, essOver := range parsed.EssentialOverrides {
 			if essOver.Container == cName {
-				if err := validateContainer(cName); err != nil {
-					return nil, err
-				}
 				oldEss := aws.ToBool(c.Essential)
 				if oldEss != essOver.Essential {
 					*diffs = append(*diffs, fmt.Sprintf("Changed essential of container %q to: %t (was: %t)", cName, essOver.Essential, oldEss))
@@ -220,9 +309,6 @@ func mutateTaskDefinition(baseTd *types.TaskDefinition, parsed *ParsedArgs, diff
 		// HealthCheck
 		for _, hcOver := range parsed.HealthCheckOverrides {
 			if hcOver.Container == cName {
-				if err := validateContainer(cName); err != nil {
-					return nil, err
-				}
 				newHc := &types.HealthCheck{
 					Command:     []string{"CMD-SHELL", hcOver.Command},
 					Interval:    aws.Int32(int32(hcOver.Interval)),
